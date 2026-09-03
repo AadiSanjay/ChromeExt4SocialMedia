@@ -1,16 +1,34 @@
 let currentSession = null;
 
 function addElapsedTime(domain, elapsedTime) {
-chrome.storage.local.get(domain).then((result) => {
-    if (result[domain] != null) {
-        result[domain] += elapsedTime;
+const localDate = new Date().toLocaleDateString('sv-SE');
+chrome.storage.local.get(["usage", "usageDate"]).then((result) => {
+    if (result.usage == null) {
+        result.usage = {};
+    }
+    if (result.usageDate != localDate) {
+    result.usage = {};
+    result.usageDate = localDate;
+}
+    if (result.usage[domain] != null) {
+        result.usage[domain] += elapsedTime;
     } else {
-        result[domain] = elapsedTime;
+        result.usage[domain] = elapsedTime;
     }
      chrome.storage.local.set({
-    [domain]: result[domain]
+    "usage": result.usage,
+    "usageDate": result.usageDate
+
 });      
 });
+}
+
+function checkpointSession() {
+    if (currentSession != null) {
+        const elapsedTime = (Date.now() - currentSession.startTime) / 1000;
+        addElapsedTime(currentSession.domain, elapsedTime);
+        currentSession.startTime = Date.now();
+    }
 }
 
 chrome.windows.getLastFocused({}).then((window) => {
