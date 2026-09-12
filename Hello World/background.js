@@ -31,7 +31,13 @@ function checkpointSession() {
     }
 }
 
-chrome.windows.getLastFocused({}).then((window) => {
+function refreshSession() {
+    checkpointSession();
+    chrome.windows.getLastFocused({}).then((window) => {
+        if (!window.focused) {
+            currentSession = null;
+            return;
+        }
     chrome.tabs.query({
         active: true,
         windowId: window.id
@@ -57,8 +63,54 @@ chrome.windows.getLastFocused({}).then((window) => {
 
         } else {
             console.log("This is not a valid URL");
+            currentSession = null;
         }
 
     });
 });
+}
+chrome.idle.onStateChanged.addListener((newState) => {
+    if (newState === "active") {
+        refreshSession();
+    }
+    else {
+        checkpointSession();
+        currentSession = null;
+    }
+});
 
+chrome.tabs.onActivated.addListener(() => {
+    refreshSession();
+});
+
+chrome.windows.onFocusChanged.addListener((windowId) => {
+    if (windowId === chrome.windows.WINDOW_ID_NONE) {
+        checkpointSession();
+        currentSession = null;
+    }
+    else {
+        refreshSession();
+    }
+});
+refreshSession();
+
+async function getCurrentSession() {
+    const result = await chrome.storage.session.get("currentSession");
+    return result.currentSession;
+}
+
+function setCurrentSession(session){
+    chrome.storage.session.set({
+        currentSession: session
+    })
+}
+
+async function setCurrentSession(session) {
+    await chrome.storage.session.set({
+        currentSession: session
+    })
+}
+
+async function clearCurrentSession(){
+    await chrome.storage.session.remove("currentSession");
+}
