@@ -9,6 +9,7 @@
   "permissions": [
     "storage",
     "tabs",
-    "idle"
+    "idle",
+    "alarms"
   ]
 }

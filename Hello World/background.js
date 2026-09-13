@@ -1,8 +1,33 @@
-let currentSession = null;
+let refreshQueue = Promise.resolve();
 
-function addElapsedTime(domain, elapsedTime) {
+function queueRefresh() {
+    refreshQueue = refreshQueue.then(() => refreshSession())
+    .catch((error) => {
+        console.error("Error in refreshQueue:", error)
+    });
+}
+
+function queueStop(){
+    refreshQueue = refreshQueue.then(async() => {
+        await checkpointSession();
+        await clearCurrentSession();
+    })
+    .catch((error) => {
+        console.error("Error in queueStop:", error)
+    });
+    
+}
+
+function queueCheckpoint() {
+    refreshQueue = refreshQueue.then(() => checkpointSession()
+    .catch((error) => {
+        console.error("Error in queueCheckpoint:", error)
+    }));
+}
+
+async function addElapsedTime(domain, elapsedTime) {
 const localDate = new Date().toLocaleDateString('sv-SE');
-chrome.storage.local.get(["usage", "usageDate"]).then((result) => {
+    const result = await chrome.storage.local.get(["usage", "usageDate"]);
     if (result.usage == null) {
         result.usage = {};
     }
@@ -15,33 +40,35 @@ chrome.storage.local.get(["usage", "usageDate"]).then((result) => {
     } else {
         result.usage[domain] = elapsedTime;
     }
-     chrome.storage.local.set({
+     await chrome.storage.local.set({
     "usage": result.usage,
     "usageDate": result.usageDate
 
 });      
-});
 }
 
-function checkpointSession() {
-    if (currentSession != null) {
-        const elapsedTime = (Date.now() - currentSession.startTime) / 1000;
-        addElapsedTime(currentSession.domain, elapsedTime);
-        currentSession.startTime = Date.now();
+
+async function checkpointSession() {
+     let session = await getCurrentSession();
+    if (session != null) {
+        const elapsedTime = (Date.now() - session.startTime) / 1000;
+        await addElapsedTime(session.domain, elapsedTime);
+        session.startTime = Date.now();
+        await setCurrentSession(session);
     }
 }
 
-function refreshSession() {
-    checkpointSession();
-    chrome.windows.getLastFocused({}).then((window) => {
+async function refreshSession() {
+    await checkpointSession();
+    const window = await chrome.windows.getLastFocused();
         if (!window.focused) {
-            currentSession = null;
+            await clearCurrentSession();
             return;
         }
-    chrome.tabs.query({
+     const tabs = await chrome.tabs.query({
         active: true,
         windowId: window.id
-    }).then((tabs) => {
+     });
 
         if (
             tabs[0] != null &&
@@ -54,55 +81,46 @@ function refreshSession() {
             const tabUrl = tabs[0].url;
             const parsedUrl = new URL(tabUrl);
 
-            currentSession = {
+            const session = {
                 domain: parsedUrl.hostname,
                 startTime: Date.now()
             };
-
-            console.log(currentSession);
+           await setCurrentSession(session);
+            console.log(session);
 
         } else {
             console.log("This is not a valid URL");
-            currentSession = null;
+            await clearCurrentSession();
         }
 
-    });
-});
-}
+    }
+
 chrome.idle.onStateChanged.addListener((newState) => {
     if (newState === "active") {
-        refreshSession();
+        queueRefresh();
     }
     else {
-        checkpointSession();
-        currentSession = null;
+        queueStop();
     }
 });
 
 chrome.tabs.onActivated.addListener(() => {
-    refreshSession();
+    queueRefresh();
 });
 
 chrome.windows.onFocusChanged.addListener((windowId) => {
     if (windowId === chrome.windows.WINDOW_ID_NONE) {
-        checkpointSession();
-        currentSession = null;
+        queueStop();
     }
     else {
-        refreshSession();
+        queueRefresh();
     }
 });
-refreshSession();
+queueRefresh();
 
 async function getCurrentSession() {
     const result = await chrome.storage.session.get("currentSession");
     return result.currentSession;
-}
-
-function setCurrentSession(session){
-    chrome.storage.session.set({
-        currentSession: session
-    })
 }
 
 async function setCurrentSession(session) {
