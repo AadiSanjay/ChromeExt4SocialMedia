@@ -11,5 +11,16 @@
     "tabs",
     "idle",
     "alarms"
-  ]
+  ],
+  "content_scripts": [
+  {
+    "matches": [
+      "*://*.linkedin.com/*",
+      "*://*.youtube.com/*",
+      "*://*.instagram.com/*",
+      "*://*.tiktok.com/*"
+    ],
+    "js": ["content.js"]
+  }
+]
 }

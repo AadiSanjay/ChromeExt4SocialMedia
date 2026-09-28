@@ -18,11 +18,40 @@ function queueStop(){
     
 }
 
+async function ensureCheckpointAlarm() {
+    const alarm = await chrome.alarms.get("checkpointAlarm");
+        if(!alarm) {
+            await chrome.alarms.create("checkpointAlarm", { periodInMinutes: 1});
+        }};
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+    if (alarm.name === "checkpointAlarm") {
+        queueCheckpoint();
+    }
+});
+
 function queueCheckpoint() {
-    refreshQueue = refreshQueue.then(() => checkpointSession()
+    refreshQueue = refreshQueue.then(() => checkpointSession())
     .catch((error) => {
         console.error("Error in queueCheckpoint:", error)
-    }));
+    });
+}
+
+const trackedDomains = new Set([
+    "linkedin.com",
+    "youtube.com",
+    "instagram.com",
+    "tiktok.com"
+
+]);
+
+function getTrackedDomain(hostname) {
+    for (const domain of trackedDomains) { 
+    if (hostname === domain || hostname.endsWith("." + domain)) {
+        return domain;
+        }
+    }
+    return null;
 }
 
 async function addElapsedTime(domain, elapsedTime) {
@@ -47,13 +76,12 @@ const localDate = new Date().toLocaleDateString('sv-SE');
 });      
 }
 
-
 async function checkpointSession() {
      let session = await getCurrentSession();
     if (session != null) {
-        const elapsedTime = (Date.now() - session.startTime) / 1000;
+        const elapsedTime = (Date.now() - session.lastCheckpointTime) / 1000;
         await addElapsedTime(session.domain, elapsedTime);
-        session.startTime = Date.now();
+        session.lastCheckpointTime = Date.now();
         await setCurrentSession(session);
     }
 }
@@ -80,16 +108,24 @@ async function refreshSession() {
         ) {
             const tabUrl = tabs[0].url;
             const parsedUrl = new URL(tabUrl);
-
+            const newDomain = getTrackedDomain(parsedUrl.hostname)
+            if (newDomain === null){
+                await clearCurrentSession();
+                return;
+            }
+            const existingSession = await getCurrentSession();
+            if (existingSession != null && existingSession.domain === newDomain) {
+                return;
+            }
             const session = {
-                domain: parsedUrl.hostname,
-                startTime: Date.now()
+            domain: newDomain,
+            lastCheckpointTime: Date.now(),
+            sessionStartTime: Date.now()
             };
+            
            await setCurrentSession(session);
-            console.log(session);
 
         } else {
-            console.log("This is not a valid URL");
             await clearCurrentSession();
         }
 
@@ -108,6 +144,11 @@ chrome.tabs.onActivated.addListener(() => {
     queueRefresh();
 });
 
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+    if (changeInfo.url != null && tab.active) {
+    queueRefresh();
+}});
+
 chrome.windows.onFocusChanged.addListener((windowId) => {
     if (windowId === chrome.windows.WINDOW_ID_NONE) {
         queueStop();
@@ -117,6 +158,7 @@ chrome.windows.onFocusChanged.addListener((windowId) => {
     }
 });
 queueRefresh();
+ensureCheckpointAlarm();
 
 async function getCurrentSession() {
     const result = await chrome.storage.session.get("currentSession");
@@ -132,3 +174,40 @@ async function setCurrentSession(session) {
 async function clearCurrentSession(){
     await chrome.storage.session.remove("currentSession");
 }
+
+async function getCurrentUsage(domain) {
+    let storedUsage;
+    let sessionUsage = 0;
+    const session = await getCurrentSession();
+    const result = await chrome.storage.local.get("usage");
+    
+    if (result.usage != null && result.usage[domain] != null) {
+        storedUsage = result.usage[domain];
+    }
+    else {
+        storedUsage = 0;
+    }
+    if (session != null && session.domain === domain) {
+        const elapsedTime = (Date.now() - session.lastCheckpointTime) / 1000;
+        storedUsage += elapsedTime;
+        const totalnewTime = (Date.now() - session.sessionStartTime) / 1000;
+        sessionUsage = totalnewTime;
+    }
+    return {
+        totalUsage: storedUsage,
+        sessionUsage: sessionUsage
+    }
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+    if (message.type === "GET_USAGE") {
+        const currentDomain = getTrackedDomain(message.domain);
+
+        getCurrentUsage(currentDomain).then((usage) => {
+            sendResponse(usage);
+        });
+        return true;
+    }
+});
+
+
