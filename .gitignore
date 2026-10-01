@@ -313,4 +313,7 @@ pyrightconfig.json
 #DS_Store
 .DS_Store
 
+#.zip
+*.zip
+
 # End of https://www.toptal.com/developers/gitignore/api/node,python
